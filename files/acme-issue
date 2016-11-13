@@ -1,0 +1,55 @@
+#!/usr/bin/env ruby
+
+if ARGV.length == 0
+	STDERR.puts "Please list the DNS names you wish to request the certificate for as arguments"
+	exit 1
+end
+
+require 'openssl'
+require 'acme-client'
+
+endpoint = if ENV['LE'] == 'staging'
+	'https://acme-staging.api.letsencrypt.org/'
+else
+	'https://acme-v01.api.letsencrypt.org/'
+end
+
+KEY_FILE = "/var/lib/letsencrypt/keys/letsencrypt.key"
+
+private_key = if File.exists?(KEY_FILE)
+	OpenSSL::PKey::RSA.new(KEY_FILE)
+else
+	OpenSSL::PKey::RSA.new(4096).tap do |new_key|
+		client = Acme::Client.new(private_key: new_key, endpoint: endpoint, connection_options: { request: { open_timeout: 5, timeout: 5 } })
+		rego = client.register(contact: nil)
+		rego.agree_terms
+		File.write(KEY_FILE, new_key.to_pem)
+	end
+end
+
+client = Acme::Client.new(private_key: private_key, endpoint: endpoint, connection_options: { request: { open_timeout: 5, timeout: 5 } })
+
+ARGV.each do |d|
+	puts "Requesting validation data for #{d}..."
+	authz = client.authorize(domain: d)
+	challenge = authz.http01
+
+	File.write("/var/lib/letsencrypt/acme-challenge/#{challenge.filename.sub('.well-known/acme-challenge/', '')}", challenge.file_content)
+
+	challenge.request_verification
+	while challenge.verify_status == "pending"
+		sleep 1
+	end
+
+	if challenge.verify_status == 'valid'
+		puts "Successfully verified control of #{d}"
+	else
+		puts "Verification failed (verify status: #{challenge.verify_status})"
+	end
+end
+
+csr = Acme::Client::CertificateRequest.new(names: ARGV)
+cert = client.new_certificate(csr)
+
+File.write("/var/lib/letsencrypt/keys/#{ARGV[0]}.pem", cert.request.private_key.to_pem)
+File.write("/var/lib/letsencrypt/certs/#{ARGV[0]}.pem", cert.fullchain_to_pem)
