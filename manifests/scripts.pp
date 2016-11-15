@@ -1,4 +1,4 @@
-class letsencrypt::script {
+class letsencrypt::scripts {
 	include letsencrypt::packages
 
 	file {
