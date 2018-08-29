@@ -3,16 +3,15 @@ class letsencrypt::cronjobs {
 
 	cron {
 		"renew let's encrypt certs":
-			hour    => 1,
-			minute  => 15,
+			hour    => seeded_rand(24, "hour-${::fqdn}"),
+			minute  => seeded_rand(60, "minute-${::fqdn}"),
 			user    => "root",
-			command => "/usr/local/bin/acme-renew",
+			command => "/usr/local/bin/acme-renew && /usr/sbin/service nginx reload",
 			require => Class["letsencrypt::scripts"];
 		"purge stale challenges":
-			hour    => 1,
-			minute  => 30,
+			hour    => seeded_rand(24, "hour-purge-${::fqdn}"),
+			minute  => seeded_rand(60, "minute-purge-${::fqdn}"),
 			user    => "root",
 			command => "/usr/bin/find /var/lib/letsencrypt/acme-challenge -type f -mtime +3 -delete",
-			require => Package["tmpreaper"];
 	}
 }

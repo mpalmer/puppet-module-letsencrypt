@@ -1,5 +1,6 @@
 define letsencrypt::certificate($names) {
 	include letsencrypt::scripts
+	include letsencrypt::cronjobs
 
 	$names_array = maybe_split($names, '\s+')
 
