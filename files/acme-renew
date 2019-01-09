@@ -19,28 +19,28 @@ certs_to_renew = Dir["/var/lib/letsencrypt/certs/*.pem"].select do |f|
 end
 
 certs_to_renew.each do |f|
-	cert = OpenSSL::X509::Certificate.new(File.read(f))
-	names = cert.extensions.find { |ex| ex.oid == 'subjectAltName' }.value.split(', ').select { |n| n =~ /^DNS:/ }.map { |n| n.sub(/^DNS:/, '') }
+	begin
+		cert = OpenSSL::X509::Certificate.new(File.read(f))
+		names = cert.extensions.find { |ex| ex.oid == 'subjectAltName' }.value.split(', ').select { |n| n =~ /^DNS:/ }.map { |n| n.sub(/^DNS:/, '') }
 
-	names.each do |d|
-		authz = client.authorize(domain: d)
-		challenge = authz.http01
+		names.each do |d|
+			authz = client.authorize(domain: d)
+			challenge = authz.http01
 
-		File.write("/var/lib/letsencrypt/acme-challenge/#{challenge.filename.sub('.well-known/acme-challenge/', '')}", challenge.file_content)
+			File.write("/var/lib/letsencrypt/acme-challenge/#{challenge.filename.sub('.well-known/acme-challenge/', '')}", challenge.file_content)
 
-		challenge.request_verification
-		while challenge.verify_status == "pending"
-			sleep 1
+			challenge.request_verification
+			while challenge.verify_status == "pending"
+				sleep 1
+			end
 		end
 
-		if challenge.verify_status != 'valid'
-			puts "Verification failed for #{d} (verify status: #{challenge.verify_status})"
-		end
+		csr = Acme::Client::CertificateRequest.new(names: names)
+		cert = client.new_certificate(csr)
+
+		File.write("/var/lib/letsencrypt/keys/#{File.basename(f)}", cert.request.private_key.to_pem)
+		File.write(f, cert.fullchain_to_pem)
+	rescue StandardError => ex
+		$stderr.puts (["Failed to renew certificate in #{f}: #{ex.message} (#{ex.class})"] + ex.backtrace).join("\n  ")
 	end
-
-	csr = Acme::Client::CertificateRequest.new(names: names)
-	cert = client.new_certificate(csr)
-
-	File.write("/var/lib/letsencrypt/keys/#{File.basename(f)}", cert.request.private_key.to_pem)
-	File.write(f, cert.fullchain_to_pem)
 end
