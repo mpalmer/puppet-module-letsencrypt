@@ -1,5 +1,7 @@
 #!/usr/bin/env ruby
 
+gem "acme-client", "< 2"
+
 require 'openssl'
 require 'acme-client'
 

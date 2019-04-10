@@ -1,5 +1,7 @@
 #!/usr/bin/env ruby
 
+gem "acme-client", "< 2"
+
 if ARGV.length == 0
 	STDERR.puts "Please list the DNS names you wish to request the certificate for as arguments"
 	exit 1
