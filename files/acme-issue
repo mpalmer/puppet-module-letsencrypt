@@ -1,6 +1,6 @@
 #!/usr/bin/env ruby
 
-gem "acme-client", "< 2"
+gem "acme-client", "~> 2.0"
 
 if ARGV.length == 0
 	STDERR.puts "Please list the DNS names you wish to request the certificate for as arguments"
@@ -10,38 +10,38 @@ end
 require 'openssl'
 require 'acme-client'
 
-endpoint = if ENV['LE'] == 'staging'
-	'https://acme-staging.api.letsencrypt.org/'
+directory = if ENV['LE'] == 'staging'
+	'https://acme-staging-v02.api.letsencrypt.org/directory'
 else
-	'https://acme-v01.api.letsencrypt.org/'
+	'https://acme-v02.api.letsencrypt.org/directory'
 end
 
 KEY_FILE = "/var/lib/letsencrypt/keys/letsencrypt.key"
 
 unless File.exists?(KEY_FILE)
 	new_key = OpenSSL::PKey::RSA.new(4096)
-	client = Acme::Client.new(private_key: new_key, endpoint: endpoint, connection_options: { request: { open_timeout: 5, timeout: 5 } })
-	rego = client.register(contact: nil)
-	rego.agree_terms
+	client = Acme::Client.new(private_key: new_key, directory: directory)
+	client.new_account(contact: nil, terms_of_service_agreed: true)
 	File.write(KEY_FILE, new_key.to_pem)
 end
 
 private_key = OpenSSL::PKey::RSA.new(File.read(KEY_FILE))
-client = Acme::Client.new(private_key: private_key, endpoint: endpoint, connection_options: { request: { open_timeout: 5, timeout: 5 } })
+client = Acme::Client.new(private_key: private_key, directory: directory)
 
-ARGV.each do |d|
-	puts "Requesting validation data for #{d}..."
-	authz = client.authorize(domain: d)
+order = client.new_order(identifiers: ARGV)
+
+order.authorizations.each do |authz|
 	challenge = authz.http01
 
 	File.write("/var/lib/letsencrypt/acme-challenge/#{challenge.filename.sub('.well-known/acme-challenge/', '')}", challenge.file_content)
 
-	challenge.request_verification
-	while challenge.verify_status == "pending"
+	challenge.request_validation
+	while challenge.status == "pending"
 		sleep 1
+		challenge.reload
 	end
 
-	if challenge.verify_status == 'valid'
+	if challenge.status == 'valid'
 		puts "Successfully verified control of #{d}"
 	else
 		puts "Verification failed (verify status: #{challenge.verify_status})"
@@ -49,7 +49,13 @@ ARGV.each do |d|
 end
 
 csr = Acme::Client::CertificateRequest.new(names: ARGV)
-cert = client.new_certificate(csr)
+order.finalize(csr: csr)
+while order.status == "processing"
+  sleep 1
+  order.reload
+end
 
-File.write("/var/lib/letsencrypt/keys/#{ARGV[0]}.pem", cert.request.private_key.to_pem)
-File.write("/var/lib/letsencrypt/certs/#{ARGV[0]}.pem", cert.fullchain_to_pem)
+File.write("/var/lib/letsencrypt/keys/#{ARGV[0]}.pem", csr.private_key.to_pem)
+File.write("/var/lib/letsencrypt/certs/#{ARGV[0]}.pem", order.certificate)
+
+# vim: noet ts=3:

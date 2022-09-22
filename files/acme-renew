@@ -1,20 +1,20 @@
 #!/usr/bin/env ruby
 
-gem "acme-client", "< 2"
+gem "acme-client", "~> 2.0"
 
 require 'openssl'
 require 'acme-client'
 
-endpoint = if ENV['LE'] == 'staging'
-	'https://acme-staging.api.letsencrypt.org/'
+directory = if ENV['LE'] == 'staging'
+	'https://acme-staging-v02.api.letsencrypt.org/directory'
 else
-	'https://acme-v01.api.letsencrypt.org/'
+	'https://acme-v02.api.letsencrypt.org/directory'
 end
 
 KEY_FILE = "/var/lib/letsencrypt/keys/letsencrypt.key"
 
 private_key = OpenSSL::PKey::RSA.new(File.read(KEY_FILE))
-client = Acme::Client.new(private_key: private_key, endpoint: endpoint, connection_options: { request: { open_timeout: 5, timeout: 5 } })
+client = Acme::Client.new(private_key: private_key, directory: directory)
 
 certs_to_renew = Dir["/var/lib/letsencrypt/certs/*.pem"].select do |f|
 	OpenSSL::X509::Certificate.new(File.read(f)).not_after < Time.now + 30 * 86400
@@ -25,24 +25,31 @@ certs_to_renew.each do |f|
 		cert = OpenSSL::X509::Certificate.new(File.read(f))
 		names = cert.extensions.find { |ex| ex.oid == 'subjectAltName' }.value.split(', ').select { |n| n =~ /^DNS:/ }.map { |n| n.sub(/^DNS:/, '') }
 
-		names.each do |d|
-			authz = client.authorize(domain: d)
+		order = client.new_order(identifiers: names)
+		order.authorizations.each do |authz|
 			challenge = authz.http01
 
 			File.write("/var/lib/letsencrypt/acme-challenge/#{challenge.filename.sub('.well-known/acme-challenge/', '')}", challenge.file_content)
 
-			challenge.request_verification
-			while challenge.verify_status == "pending"
+			challenge.request_validation
+			while challenge.status == "pending"
 				sleep 1
+				challenge.reload
 			end
 		end
 
 		csr = Acme::Client::CertificateRequest.new(names: names)
-		cert = client.new_certificate(csr)
+		order.finalize(csr: csr)
+		while order.status == "processing"
+		  sleep 1
+		  order.reload
+		end
 
-		File.write("/var/lib/letsencrypt/keys/#{File.basename(f)}", cert.request.private_key.to_pem)
-		File.write(f, cert.fullchain_to_pem)
+		File.write("/var/lib/letsencrypt/keys/#{File.basename(f)}", csr.private_key.to_pem)
+		File.write(f, order.certificate)
 	rescue StandardError => ex
 		$stderr.puts (["Failed to renew certificate in #{f}: #{ex.message} (#{ex.class})"] + ex.backtrace).join("\n  ")
 	end
 end
+
+# vim: noet ts=3:
