@@ -42,7 +42,7 @@ order.authorizations.each do |authz|
 	end
 
 	if challenge.status == 'valid'
-		puts "Successfully verified control of #{d}"
+		puts "Successfully verified control of #{authz.domain}"
 	else
 		puts "Verification failed (verify status: #{challenge.verify_status})"
 	end
