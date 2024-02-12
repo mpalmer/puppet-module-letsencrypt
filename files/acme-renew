@@ -36,6 +36,13 @@ certs_to_renew.each do |f|
 				sleep 1
 				challenge.reload
 			end
+
+			if challenge.status == 'valid'
+				puts "Successfully verified control of #{authz.domain}"
+			else
+				puts "Verification failed for #{authz.domain} (error: #{challenge.error})"
+				exit 1
+			end
 		end
 
 		csr = Acme::Client::CertificateRequest.new(names: names)
